@@ -1,9 +1,16 @@
 import os
+import sys
 import pytest
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
 load_dotenv()
+
+# Fix Windows console encoding for libraries that print Unicode (e.g. Crawl4AI)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 
 TEST_SCHEMA = "scraper_staging_test"
 
