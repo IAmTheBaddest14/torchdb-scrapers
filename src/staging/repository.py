@@ -58,6 +58,18 @@ class StagingRepository:
         )
         return RawPage(**row)
 
+    def get_latest_crawl_run(self, brand: str) -> CrawlRun | None:
+        rows = (
+            self._table("crawl_runs")
+            .select("*")
+            .eq("brand", brand)
+            .order("started_at", desc=True)
+            .limit(1)
+            .execute()
+            .data
+        )
+        return CrawlRun(**rows[0]) if rows else None
+
     def get_raw_pages_for_run(self, crawl_run_id: int) -> list[RawPage]:
         rows = (
             self._table("raw_pages")

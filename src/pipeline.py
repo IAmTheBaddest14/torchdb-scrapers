@@ -55,9 +55,11 @@ class ScraperPipeline:
                     result.promotion_results = self._run_promote(extracted)
 
         elif phase == "extract":
-            # Read from the most recent crawl run — caller provides crawl_run_id via urls=None
-            # For now, get all unextracted raw pages (simplified: read from last run)
-            raw_pages = self._repo.get_raw_pages_for_run(crawl_run_id=None)
+            latest = self._repo.get_latest_crawl_run(brand=brand)
+            if not latest:
+                print(f"No crawl runs found for brand '{brand}'. Run --phase crawl first.")
+                return result
+            raw_pages = self._repo.get_raw_pages_for_run(crawl_run_id=latest.id)
             extracted = self._run_extract_pages(raw_pages, dry_run)
             result.products_extracted = len(extracted)
             if promote:
