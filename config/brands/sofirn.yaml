@@ -1,0 +1,30 @@
+brand: sofirn
+base_url: "https://sofirnlight.com"
+platform: shopify
+
+collection_paths:
+  - "/collections/sofirn-flashlights"
+  - "/collections/headlamps"
+  - "/collections/lanterns"
+
+exclude_patterns:
+  - "(?i)battery"
+  - "(?i)charger"
+  - "(?i)accessory"
+  - "(?i)^replacement"
+  - "(?i)spare.?part"
+  - "(?i)holster"
+  - "(?i)lanyard"
+  - "(?i)diffuser"
+  - "(?i)clip"
+
+scraper_hints:
+  led_option_names:
+    - "LED"
+    - "Emitter"
+  driver_option_names:
+    - "Driver"
+  cct_option_names:
+    - "CCT"
+    - "Color Temperature"
+    - "Tint"
