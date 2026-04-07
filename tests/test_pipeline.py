@@ -80,6 +80,33 @@ def fake_promotion_engine(action: str = "insert"):
 
 URLS = ["https://sofirnlight.com/products/sc33"]
 
+SCRAPER_HINTS = {"cct_option_names": ["CCT", "Tint"], "led_option_names": ["LED"]}
+
+
+# --- Behavior 0a: scraper_hints passed to pipeline are forwarded to extractor.extract() ---
+
+@pytest.mark.asyncio
+async def test_scraper_hints_forwarded_to_extractor():
+    from src.pipeline import ScraperPipeline
+
+    crawler = fake_page_crawler()
+    extractor = fake_spec_extractor()
+    repo = fake_repo()
+    engine = fake_promotion_engine()
+
+    pipeline = ScraperPipeline(
+        page_crawler=crawler,
+        spec_extractor=extractor,
+        promotion_engine=engine,
+        repo=repo,
+        scraper_hints=SCRAPER_HINTS,
+    )
+
+    await pipeline.run(phase="both", urls=URLS)
+
+    call_kwargs = extractor.extract.call_args.kwargs
+    assert call_kwargs.get("scraper_hints") == SCRAPER_HINTS
+
 
 # --- Behavior 0: ExtractionError → pipeline continues, records failure in PipelineResult ---
 

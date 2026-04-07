@@ -14,7 +14,7 @@ class ExtractionError(Exception):
         self.reason = reason
         self.detail = detail
 
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
 
 _SYSTEM_PROMPT = """You are a flashlight specification extractor. Given markdown from a flashlight product page, extract structured data and return ONLY valid JSON with this exact shape:
 
@@ -35,6 +35,44 @@ _SYSTEM_PROMPT = """You are a flashlight specification extractor. Given markdown
 }
 
 Return only the JSON object. No markdown fences, no explanation."""
+
+
+def _build_variant_context(raw_variant_data: dict | None, scraper_hints: dict | None) -> str:
+    """Format variant data and scraper hints into a structured prompt section."""
+    parts: list[str] = []
+
+    if raw_variant_data:
+        options = raw_variant_data.get("options", [])
+        if options:
+            parts.append("## Variant Options")
+            for opt in options:
+                values = ", ".join(str(v) for v in opt.get("values", []))
+                parts.append(f"- {opt['name']}: {values}")
+
+        variants = raw_variant_data.get("variants", [])
+        if variants:
+            parts.append("\n## Variant Details")
+            # Build header from option names
+            first = variants[0]
+            opt_keys = list(first.get("options", {}).keys())
+            header = " | ".join(opt_keys + ["Price", "Available"])
+            separator = " | ".join(["---"] * (len(opt_keys) + 2))
+            parts.append(f"| {header} |")
+            parts.append(f"| {separator} |")
+            for v in variants:
+                opt_vals = [str(v["options"].get(k, "")) for k in opt_keys]
+                price = v.get("price", "")
+                available = "Yes" if v.get("available") else "No"
+                row = " | ".join(opt_vals + [price, available])
+                parts.append(f"| {row} |")
+
+    if scraper_hints:
+        parts.append("\n## Scraper Hints")
+        for key, values in scraper_hints.items():
+            label = key.replace("_", " ")
+            parts.append(f"- {label}: {', '.join(str(v) for v in values)}")
+
+    return "\n".join(parts)
 
 
 def _confidence(graph: dict[str, Any]) -> tuple[float, str]:
@@ -69,19 +107,23 @@ class SpecExtractor:
         self._client = anthropic_client
         self._prompt_version = prompt_version
 
-    def extract(self, raw_page: RawPage) -> ExtractedProduct:
-        """Send raw_page.markdown to Claude and return an ExtractedProduct.
+    def extract(self, raw_page: RawPage, scraper_hints: dict | None = None) -> ExtractedProduct:
+        """Send raw_page.markdown (+ variant data + hints) to Claude and return an ExtractedProduct.
 
         Does not save to the database — caller is responsible for persisting via repo.
         """
         markdown = raw_page.markdown or ""
+        variant_context = _build_variant_context(raw_page.raw_variant_data, scraper_hints)
+        user_content = f"Extract specs from this flashlight page:\n\n{markdown}"
+        if variant_context:
+            user_content += f"\n\n{variant_context}"
 
         try:
             message = self._client.messages.create(
                 model="claude-sonnet-4-6",
                 max_tokens=2048,
                 system=_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": f"Extract specs from this flashlight page:\n\n{markdown}"}],
+                messages=[{"role": "user", "content": user_content}],
             )
         except Exception as e:
             raise ExtractionError(reason="api_error", detail=str(e))

@@ -14,14 +14,15 @@ from src.staging.models import RawPage
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
-def make_raw_page(markdown: str, url: str = "https://sofirnlight.com/products/sc33") -> RawPage:
+def make_raw_page(markdown: str, url: str = "https://sofirnlight.com/products/sc33",
+                  raw_variant_data=None) -> RawPage:
     return RawPage(
         id=1,
         crawl_run_id=1,
         url=url,
         markdown=markdown,
         image_urls=[],
-        raw_variant_data=None,
+        raw_variant_data=raw_variant_data,
         crawled_at=datetime.now(timezone.utc),
         scraper_version="test",
     )
@@ -210,6 +211,29 @@ def test_api_error_raises_extraction_error():
     assert "Rate limit exceeded" in err.detail
 
 
+VARIANT_DATA = {
+    "options": [
+        {"name": "CCT", "values": ["5000K", "6500K"]},
+    ],
+    "variants": [
+        {"id": "aaa", "options": {"CCT": "5000K"}, "price": "31.99", "available": True},
+        {"id": "bbb", "options": {"CCT": "6500K"}, "price": "31.99", "available": True},
+    ],
+}
+
+SCRAPER_HINTS = {
+    "cct_option_names": ["CCT", "Color Temperature", "Tint"],
+    "led_option_names": ["LED", "Emitter"],
+}
+
+
+def capture_llm_message(client) -> str:
+    """Return the user message string that was sent to the fake LLM."""
+    call_args = client.messages.create.call_args
+    messages = call_args.kwargs.get("messages") or call_args.args[2] if call_args.args else []
+    return messages[0]["content"] if messages else ""
+
+
 # --- Behavior 9: Brand is lowercased on ExtractedProduct regardless of LLM casing ---
 
 def test_brand_is_normalized_to_lowercase():
@@ -222,3 +246,74 @@ def test_brand_is_normalized_to_lowercase():
     result = extractor.extract(make_raw_page("Some markdown."))
 
     assert result.brand == "sofirn"
+
+
+VARIANT_DATA = {
+    "options": [
+        {"name": "CCT", "values": ["5000K", "6500K"]},
+    ],
+    "variants": [
+        {"id": "aaa", "options": {"CCT": "5000K"}, "price": "31.99", "available": True},
+        {"id": "bbb", "options": {"CCT": "6500K"}, "price": "31.99", "available": True},
+    ],
+}
+
+SCRAPER_HINTS = {
+    "cct_option_names": ["CCT", "Color Temperature", "Tint"],
+    "led_option_names": ["LED", "Emitter"],
+}
+
+
+def capture_llm_message(client) -> str:
+    """Return the user message string that was sent to the fake LLM."""
+    call_args = client.messages.create.call_args
+    messages = call_args.kwargs.get("messages") or []
+    return messages[0]["content"] if messages else ""
+
+
+# --- Behavior 10: Variant option names and values appear in the LLM user message ---
+
+def test_variant_options_included_in_llm_message():
+    from src.extractor.spec_extractor import SpecExtractor
+
+    client = fake_anthropic_client(SC33_GRAPH)
+    extractor = SpecExtractor(client)
+    raw_page = make_raw_page("Some markdown.", raw_variant_data=VARIANT_DATA)
+
+    extractor.extract(raw_page)
+
+    msg = capture_llm_message(client)
+    assert "CCT" in msg
+    assert "5000K" in msg
+    assert "6500K" in msg
+
+
+# --- Behavior 11: Per-variant prices appear in the LLM user message ---
+
+def test_variant_prices_included_in_llm_message():
+    from src.extractor.spec_extractor import SpecExtractor
+
+    client = fake_anthropic_client(SC33_GRAPH)
+    extractor = SpecExtractor(client)
+    raw_page = make_raw_page("Some markdown.", raw_variant_data=VARIANT_DATA)
+
+    extractor.extract(raw_page)
+
+    msg = capture_llm_message(client)
+    assert "31.99" in msg
+
+
+# --- Behavior 12: Scraper hints appear in the LLM message when provided ---
+
+def test_scraper_hints_included_in_llm_message():
+    from src.extractor.spec_extractor import SpecExtractor
+
+    client = fake_anthropic_client(SC33_GRAPH)
+    extractor = SpecExtractor(client)
+    raw_page = make_raw_page("Some markdown.")
+
+    extractor.extract(raw_page, scraper_hints=SCRAPER_HINTS)
+
+    msg = capture_llm_message(client)
+    assert "Color Temperature" in msg
+    assert "Emitter" in msg

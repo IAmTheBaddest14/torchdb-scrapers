@@ -42,6 +42,7 @@ def build_pipeline(brand: str, dry_run: bool, promote: bool):
         spec_extractor=spec_extractor,
         promotion_engine=promotion_engine,
         repo=repo,
+        scraper_hints=config.scraper_hints or None,
     )
 
 

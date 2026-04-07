@@ -22,12 +22,14 @@ class PipelineResult:
 
 class ScraperPipeline:
     def __init__(self, page_crawler, spec_extractor, promotion_engine, repo,
-                 scraper_version: str = _SCRAPER_VERSION):
+                 scraper_version: str = _SCRAPER_VERSION,
+                 scraper_hints: dict | None = None):
         self._crawler = page_crawler
         self._extractor = spec_extractor
         self._promotion = promotion_engine
         self._repo = repo
         self._version = scraper_version
+        self._scraper_hints = scraper_hints
 
     async def run(
         self,
@@ -94,7 +96,7 @@ class ScraperPipeline:
         extracted = []
         for raw_page in raw_pages:
             try:
-                product = self._extractor.extract(raw_page)
+                product = self._extractor.extract(raw_page, scraper_hints=self._scraper_hints)
             except ExtractionError as e:
                 print(f"EXTRACTION FAILED: {raw_page.url}\n  Reason: {e.reason}\n  Detail: {e.detail[:200]}")
                 if result is not None:
