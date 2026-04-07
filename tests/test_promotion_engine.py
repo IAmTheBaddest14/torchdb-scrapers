@@ -97,7 +97,7 @@ def test_high_confidence_identical_existing_record_skips():
         "weight_g": 110,
         "material": "aluminum",
     }
-    client = FakeTorchDBClient(existing={("sofirn", "XHP70.3 HI", "Boost driver"): existing_record})
+    client = FakeTorchDBClient(existing={("sofirn", "xhp70.3 hi", "boost driver"): existing_record})
     repo = FakeRepo()
     engine = PromotionEngine(client, repo)
 
@@ -122,7 +122,7 @@ def test_high_confidence_changed_specs_requires_review_with_diff():
         "weight_g": 110,
         "material": "aluminum",
     }
-    client = FakeTorchDBClient(existing={("sofirn", "XHP70.3 HI", "Boost driver"): existing_record})
+    client = FakeTorchDBClient(existing={("sofirn", "xhp70.3 hi", "boost driver"): existing_record})
     repo = FakeRepo()
     engine = PromotionEngine(client, repo)
 
@@ -146,7 +146,7 @@ def test_non_high_confidence_always_requires_review(tier, score):
 
     # Even if a matching TorchDB record exists, low/medium still go to review
     existing_record = {"max_lumens": 5200, "length_mm": 131, "weight_g": 110, "material": "aluminum"}
-    client = FakeTorchDBClient(existing={("sofirn", "XHP70.3 HI", "Boost driver"): existing_record})
+    client = FakeTorchDBClient(existing={("sofirn", "xhp70.3 hi", "boost driver"): existing_record})
     repo = FakeRepo()
     engine = PromotionEngine(client, repo)
 

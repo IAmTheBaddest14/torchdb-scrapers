@@ -208,3 +208,17 @@ def test_api_error_raises_extraction_error():
     err = exc_info.value
     assert err.reason == "api_error"
     assert "Rate limit exceeded" in err.detail
+
+
+# --- Behavior 9: Brand is lowercased on ExtractedProduct regardless of LLM casing ---
+
+def test_brand_is_normalized_to_lowercase():
+    from src.extractor.spec_extractor import SpecExtractor
+
+    mixed_case_graph = {**SC33_GRAPH, "brand": "  Sofirn  "}
+    client = fake_anthropic_client(mixed_case_graph)
+    extractor = SpecExtractor(client)
+
+    result = extractor.extract(make_raw_page("Some markdown."))
+
+    assert result.brand == "sofirn"

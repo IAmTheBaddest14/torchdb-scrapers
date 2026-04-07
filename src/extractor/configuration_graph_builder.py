@@ -37,8 +37,8 @@ class ConfigurationGraphBuilder:
         seen: dict[tuple[str, str], Configuration] = {}
 
         for pairing in graph.get("pairings", []):
-            led_name = pairing["led"]
-            driver_name = pairing["driver"]
+            led_name = pairing["led"].strip().lower()
+            driver_name = pairing["driver"].strip().lower()
             key = (led_name, driver_name)
 
             if key in seen:
@@ -51,7 +51,7 @@ class ConfigurationGraphBuilder:
                     existing.mode_group = mode_group
                 continue
 
-            led = leds_by_name.get(led_name, {})
+            led = leds_by_name.get(pairing["led"], leds_by_name.get(led_name, {}))
             cct_options = list(led.get("cct_hints", []))
 
             seen[key] = Configuration(

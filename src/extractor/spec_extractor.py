@@ -108,8 +108,8 @@ class SpecExtractor:
         return ExtractedProduct(
             id=0,
             raw_page_id=raw_page.id,
-            brand=graph.get("brand", ""),
-            model=graph.get("product_name", ""),
+            brand=graph.get("brand", "").strip().lower(),
+            model=graph.get("product_name", "").strip(),
             configuration_graph=graph,
             confidence_score=score,
             confidence_tier=tier,
