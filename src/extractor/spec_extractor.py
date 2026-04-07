@@ -1,9 +1,18 @@
 """SpecExtractor — Phase 2: LLM extraction from stored RawPage markdown."""
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 
 from src.staging.models import ExtractedProduct, RawPage
+
+
+class ExtractionError(Exception):
+    """Raised when LLM extraction fails. Carries structured reason and detail."""
+    def __init__(self, reason: str, detail: str):
+        super().__init__(f"{reason}: {detail}")
+        self.reason = reason
+        self.detail = detail
 
 PROMPT_VERSION = "v1"
 
@@ -67,15 +76,28 @@ class SpecExtractor:
         """
         markdown = raw_page.markdown or ""
 
-        message = self._client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=2048,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": f"Extract specs from this flashlight page:\n\n{markdown}"}],
-        )
+        try:
+            message = self._client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=2048,
+                system=_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": f"Extract specs from this flashlight page:\n\n{markdown}"}],
+            )
+        except Exception as e:
+            raise ExtractionError(reason="api_error", detail=str(e))
 
         raw_json = message.content[0].text.strip()
-        graph: dict[str, Any] = json.loads(raw_json)
+        # Strip markdown code fences if Claude wrapped the response
+        raw_json = re.sub(r"^```(?:json)?\s*", "", raw_json)
+        raw_json = re.sub(r"\s*```$", "", raw_json).strip()
+
+        try:
+            graph: dict[str, Any] = json.loads(raw_json)
+        except json.JSONDecodeError:
+            raise ExtractionError(
+                reason="json_parse_error",
+                detail=raw_json[:200],
+            )
 
         # Ensure source_url falls back to the page URL if LLM left it null
         if not graph.get("source_url"):

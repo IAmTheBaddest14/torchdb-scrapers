@@ -6,10 +6,18 @@ _SCRAPER_VERSION = "0.1.0"
 
 
 @dataclass
+class ExtractionFailure:
+    url: str
+    reason: str   # 'json_parse_error' | 'api_error'
+    detail: str
+
+
+@dataclass
 class PipelineResult:
     pages_crawled: int = 0
     products_extracted: int = 0
     promotion_results: list = field(default_factory=list)
+    failed_extractions: list = field(default_factory=list)  # list[ExtractionFailure]
 
 
 class ScraperPipeline:
@@ -49,7 +57,7 @@ class ScraperPipeline:
                 self._repo.complete_crawl_run(crawl_run.id, len(pages))
 
             if phase == "both" and not dry_run:
-                extracted = self._run_extract(crawl_run.id, dry_run)
+                extracted = self._run_extract(crawl_run.id, dry_run, result)
                 result.products_extracted = len(extracted)
                 if promote:
                     result.promotion_results = self._run_promote(extracted)
@@ -60,7 +68,7 @@ class ScraperPipeline:
                 print(f"No crawl runs found for brand '{brand}'. Run --phase crawl first.")
                 return result
             raw_pages = self._repo.get_raw_pages_for_run(crawl_run_id=latest.id)
-            extracted = self._run_extract_pages(raw_pages, dry_run)
+            extracted = self._run_extract_pages(raw_pages, dry_run, result)
             result.products_extracted = len(extracted)
             if promote:
                 result.promotion_results = self._run_promote(extracted)
@@ -77,14 +85,23 @@ class ScraperPipeline:
                 pages.append(raw_page)
         return pages
 
-    def _run_extract(self, crawl_run_id: int, dry_run: bool) -> list:
+    def _run_extract(self, crawl_run_id: int, dry_run: bool, result: "PipelineResult | None" = None) -> list:
         raw_pages = self._repo.get_raw_pages_for_run(crawl_run_id=crawl_run_id)
-        return self._run_extract_pages(raw_pages, dry_run)
+        return self._run_extract_pages(raw_pages, dry_run, result)
 
-    def _run_extract_pages(self, raw_pages: list, dry_run: bool) -> list:
+    def _run_extract_pages(self, raw_pages: list, dry_run: bool, result: "PipelineResult | None" = None) -> list:
+        from src.extractor.spec_extractor import ExtractionError
         extracted = []
         for raw_page in raw_pages:
-            product = self._extractor.extract(raw_page)
+            try:
+                product = self._extractor.extract(raw_page)
+            except ExtractionError as e:
+                print(f"EXTRACTION FAILED: {raw_page.url}\n  Reason: {e.reason}\n  Detail: {e.detail[:200]}")
+                if result is not None:
+                    result.failed_extractions.append(
+                        ExtractionFailure(url=raw_page.url, reason=e.reason, detail=e.detail)
+                    )
+                continue
             if product and not dry_run:
                 self._repo.save_extracted_product(
                     raw_page_id=raw_page.id,

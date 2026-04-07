@@ -81,6 +81,50 @@ def fake_promotion_engine(action: str = "insert"):
 URLS = ["https://sofirnlight.com/products/sc33"]
 
 
+# --- Behavior 0: ExtractionError → pipeline continues, records failure in PipelineResult ---
+
+@pytest.mark.asyncio
+async def test_extraction_error_is_recorded_and_pipeline_continues():
+    from src.pipeline import ScraperPipeline
+    from src.extractor.spec_extractor import ExtractionError
+
+    page1 = make_raw_page(id=1)
+    page2 = make_raw_page(id=2, crawl_run_id=1)
+    page2 = RawPage(
+        id=2, crawl_run_id=1,
+        url="https://sofirnlight.com/products/sc31",
+        markdown="SC31 specs...",
+        image_urls=[], raw_variant_data=None,
+        crawled_at=page1.crawled_at, scraper_version="test",
+    )
+
+    extractor = MagicMock()
+    extractor.extract.side_effect = [
+        ExtractionError(reason="json_parse_error", detail="Sorry I cannot..."),
+        make_extracted_product(id=2, raw_page_id=2),
+    ]
+
+    repo = fake_repo(raw_pages=[page1, page2])
+    crawler = fake_page_crawler(pages=[page1, page2])
+    engine = fake_promotion_engine()
+
+    pipeline = ScraperPipeline(
+        page_crawler=crawler,
+        spec_extractor=extractor,
+        promotion_engine=engine,
+        repo=repo,
+    )
+
+    result = await pipeline.run(phase="both", urls=URLS + ["https://sofirnlight.com/products/sc31"])
+
+    # One succeeded, one failed
+    assert result.products_extracted == 1
+    assert len(result.failed_extractions) == 1
+    assert result.failed_extractions[0].url == "https://sofirnlight.com/products/sc33"
+    assert result.failed_extractions[0].reason == "json_parse_error"
+    assert "Sorry I cannot" in result.failed_extractions[0].detail
+
+
 # --- Behavior 1: phase='crawl' calls PageCrawler, does NOT call SpecExtractor ---
 
 @pytest.mark.asyncio

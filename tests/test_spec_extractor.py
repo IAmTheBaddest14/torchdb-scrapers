@@ -147,3 +147,64 @@ def test_extract_stores_prompt_version():
     result = extractor.extract(raw_page)
 
     assert result.extraction_prompt_version == "v42"
+
+
+# --- Behavior 6: Markdown code fences stripped before parse ---
+
+def test_markdown_fenced_json_is_parsed_correctly():
+    from src.extractor.spec_extractor import SpecExtractor
+
+    fenced = f"```json\n{json.dumps(SC33_GRAPH)}\n```"
+    content_block = MagicMock()
+    content_block.text = fenced
+    message = MagicMock()
+    message.content = [content_block]
+    client = MagicMock()
+    client.messages.create.return_value = message
+
+    extractor = SpecExtractor(client)
+    result = extractor.extract(make_raw_page("Some markdown."))
+
+    assert result.brand == "sofirn"
+    assert result.model == "Sofirn SC33"
+
+
+# --- Behavior 7: Unparseable response → raises ExtractionError(reason='json_parse_error') ---
+
+def test_unparseable_response_raises_extraction_error():
+    from src.extractor.spec_extractor import SpecExtractor, ExtractionError
+
+    garbage = "Sorry, I cannot extract specs from this page. The content is unclear."
+    content_block = MagicMock()
+    content_block.text = garbage
+    message = MagicMock()
+    message.content = [content_block]
+    client = MagicMock()
+    client.messages.create.return_value = message
+
+    extractor = SpecExtractor(client)
+
+    with pytest.raises(ExtractionError) as exc_info:
+        extractor.extract(make_raw_page("Some markdown."))
+
+    err = exc_info.value
+    assert err.reason == "json_parse_error"
+    assert garbage[:50] in err.detail
+
+
+# --- Behavior 8: API call fails → raises ExtractionError(reason='api_error') ---
+
+def test_api_error_raises_extraction_error():
+    from src.extractor.spec_extractor import SpecExtractor, ExtractionError
+
+    client = MagicMock()
+    client.messages.create.side_effect = Exception("Rate limit exceeded. Retry after 60s.")
+
+    extractor = SpecExtractor(client)
+
+    with pytest.raises(ExtractionError) as exc_info:
+        extractor.extract(make_raw_page("Some markdown."))
+
+    err = exc_info.value
+    assert err.reason == "api_error"
+    assert "Rate limit exceeded" in err.detail

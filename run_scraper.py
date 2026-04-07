@@ -67,10 +67,13 @@ async def main():
 
     print(f"Pages crawled:      {result.pages_crawled}")
     print(f"Products extracted: {result.products_extracted}")
+    print(f"Extraction failures:{len(result.failed_extractions)}")
     print(f"Promotion results:  {len(result.promotion_results)}")
     for pr in result.promotion_results:
         print(f"  [{pr.action}] {pr.configuration.led} / {pr.configuration.driver}"
               + (f" — {pr.diff_summary}" if pr.diff_summary else ""))
+    for f in result.failed_extractions:
+        print(f"  [FAILED] {f.url}\n    Reason: {f.reason}\n    Detail: {f.detail[:200]}")
 
 
 if __name__ == "__main__":
