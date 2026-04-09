@@ -1,4 +1,9 @@
 """PageCrawler — fetches product pages via Crawl4AI and saves to staging."""
+import re
+from urllib.parse import urlparse, urljoin
+
+import fitz  # PyMuPDF
+import httpx
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
 
 from src.config.brand_config import BrandConfig
@@ -7,12 +12,38 @@ from src.staging.models import RawPage
 from src.staging.repository import StagingRepository
 
 _SCRAPER_VERSION = "0.1.0"
+_PDF_LINK_RE = re.compile(r'(?:href|src)=["\']([^"\']*\.pdf(?:\?[^"\']*)?)["\']', re.IGNORECASE)
+_MANUAL_URL_RE = re.compile(r"manual|guide|instruction", re.IGNORECASE)
+
+_DEFAULT_UI_KEYWORDS = [
+    "General Operation",
+    "Operation Guide",
+    "How to Use",
+    "Operating Instructions",
+    "Button Operation",
+    "Usage Instructions",
+    "User Interface",
+]
+
+# Minimum page text length to skip likely TOC/cover pages
+_MIN_PAGE_TEXT_LEN = 200
+
+# Target render width in pixels
+_RENDER_TARGET_WIDTH = 1200
 
 
 class PageCrawler:
     def __init__(self, config: BrandConfig, scraper_version: str = _SCRAPER_VERSION):
         self.config = config
         self.scraper_version = scraper_version
+
+    def _ui_keywords(self) -> list[str]:
+        """Return UI diagram keywords from brand config, falling back to defaults."""
+        return self.config.ui_diagram.get("keywords", _DEFAULT_UI_KEYWORDS)
+
+    def _page_index_hint(self) -> int | None:
+        """Return optional page index hint from brand config."""
+        return self.config.ui_diagram.get("page_index_hint")
 
     async def crawl_product(
         self,
@@ -42,6 +73,8 @@ class PageCrawler:
         if options or variants:
             raw_variant_data = {"options": options, "variants": variants}
 
+        manual_pdf_url, manual_pdf_text, manual_ui_diagram_url = await self._fetch_pdf(html, url, repo)
+
         return repo.save_raw_page(
             crawl_run_id=crawl_run_id,
             url=url,
@@ -49,4 +82,145 @@ class PageCrawler:
             image_urls=image_urls,
             raw_variant_data=raw_variant_data or None,
             scraper_version=self.scraper_version,
+            manual_pdf_url=manual_pdf_url,
+            manual_pdf_text=manual_pdf_text,
+            manual_ui_diagram_url=manual_ui_diagram_url,
         )
+
+    async def _fetch_pdf(
+        self, html: str, page_url: str, repo: StagingRepository
+    ) -> tuple[str | None, str | None, str | None]:
+        """Find, download, and upload the product manual PDF.
+
+        Returns (hosted_pdf_url, pdf_text, ui_diagram_url).
+        """
+        pdf_url = self._find_pdf_url(html, page_url)
+        if not pdf_url:
+            return None, None, None
+
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+                response = await client.get(pdf_url)
+                response.raise_for_status()
+                pdf_bytes = response.content
+        except Exception as e:
+            print(f"  [PDF] Download failed for {pdf_url}: {e}")
+            return None, None, None
+
+        slug = urlparse(page_url).path.rstrip("/").split("/")[-1]
+
+        # Use PyMuPDF for text extraction (eliminates pypdf dependency)
+        try:
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            pdf_text = "\n".join(
+                page.get_text() for page in doc
+            ).strip()
+        except Exception as e:
+            print(f"  [PDF] Text extraction failed: {e}")
+            pdf_text = None
+            doc = None
+
+        try:
+            hosted_url = repo.upload_pdf(self.config.brand, slug, pdf_bytes)
+            print(f"  [PDF] Uploaded → {hosted_url}")
+        except Exception as e:
+            print(f"  [PDF] Upload failed: {e}")
+            hosted_url = pdf_url  # fall back to manufacturer URL
+
+        ui_diagram_url = self._extract_ui_diagram(doc, slug, repo) if doc is not None else None
+
+        return hosted_url, pdf_text, ui_diagram_url
+
+    def _extract_ui_diagram(
+        self, doc: fitz.Document, slug: str, repo: StagingRepository
+    ) -> str | None:
+        """Render the operation/UI page from the PDF as a PNG and upload it."""
+        keywords = self._ui_keywords()
+        keyword_pattern = re.compile(
+            "|".join(re.escape(k) for k in keywords), re.IGNORECASE
+        )
+
+        # Find target page: keyword match, skipping short pages (TOC/cover),
+        # preferring later matches over TOC entries
+        target_page = None
+        anchor_keyword = None
+
+        page_index_hint = self._page_index_hint()
+
+        for i, page in enumerate(doc):
+            text = page.get_text()
+            # Skip pages too short to be the real diagram page (e.g. TOC)
+            if len(text.strip()) < _MIN_PAGE_TEXT_LEN:
+                continue
+            if keyword_pattern.search(text):
+                target_page = i
+                # Find which keyword matched for use as crop anchor
+                for kw in keywords:
+                    if re.search(re.escape(kw), text, re.IGNORECASE):
+                        anchor_keyword = kw
+                        break
+                # Don't break — keep scanning so later matches win over TOC
+
+        # Fall back to page_index_hint if no keyword match
+        if target_page is None and page_index_hint is not None:
+            target_page = page_index_hint
+            print(f"  [PDF] No keyword match — using page_index_hint ({page_index_hint})")
+
+        if target_page is None:
+            print("  [PDF] No UI diagram page found")
+            return None
+
+        try:
+            page = doc[target_page]
+            scale = _RENDER_TARGET_WIDTH / page.rect.width
+            mat = fitz.Matrix(scale, scale)
+
+            # Crop from the anchor keyword heading downward
+            clip = None
+            if anchor_keyword:
+                hits = page.search_for(anchor_keyword)
+                if hits:
+                    y_top = max(0, hits[0].y0 - 8)
+                    clip = fitz.Rect(0, y_top, page.rect.width, page.rect.height)
+
+            pix = page.get_pixmap(matrix=mat, clip=clip, alpha=False)
+            png_bytes = pix.tobytes("png")
+        except Exception as e:
+            print(f"  [PDF] Page render failed: {e}")
+            return None
+
+        try:
+            url = repo.upload_ui_diagram(self.config.brand, slug, png_bytes)
+            print(f"  [PDF] UI diagram uploaded → {url}")
+            return url
+        except Exception as e:
+            print(f"  [PDF] UI diagram upload failed: {e}")
+            return None
+
+    @staticmethod
+    def _find_pdf_url(html: str, page_url: str) -> str | None:
+        """Return the best PDF URL from the page HTML.
+
+        Prefers URLs whose path contains 'manual', 'guide', or 'instruction'.
+        Falls back to the first PDF link found.
+        """
+        candidates = []
+        for match in _PDF_LINK_RE.finditer(html):
+            raw = match.group(1)
+            if raw.startswith("data:"):
+                continue
+            # Resolve to absolute URL
+            url = urljoin(page_url, raw)
+            if url.startswith("//"):
+                url = "https:" + url
+            candidates.append(url)
+
+        if not candidates:
+            return None
+
+        # Prefer URLs that look like manuals
+        candidates.sort(
+            key=lambda u: bool(_MANUAL_URL_RE.search(u)),
+            reverse=True,
+        )
+        return candidates[0]

@@ -14,9 +14,9 @@ class ExtractionError(Exception):
         self.reason = reason
         self.detail = detail
 
-PROMPT_VERSION = "v2"
+PROMPT_VERSION = "v6"
 
-_SYSTEM_PROMPT = """You are a flashlight specification extractor. Given markdown from a flashlight product page, extract structured data and return ONLY valid JSON with this exact shape:
+_SYSTEM_PROMPT = """You are a flashlight specification extractor. Given markdown from a flashlight product page (and optionally a product manual and UI diagram image), extract structured data and return ONLY valid JSON with this exact shape:
 
 {
   "product_name": "Brand Model",
@@ -30,9 +30,30 @@ _SYSTEM_PROMPT = """You are a flashlight specification extractor. Given markdown
     "material": "<string or null>",
     "max_lumens": <number or null>
   },
-  "price": "<string or null>",
-  "source_url": "<string or null>"
+  "batteries": [
+    {"type": "14500", "capacity_mah": null, "included": false, "removable": true}
+  ],
+  "tags": ["usb-charging", "magnetic-tail", "clip", "side-switch", "tail-switch", "aux-light"],
+  "compatible_accessories": ["21700 extension tube"],
+  "mode_data": [
+    {
+      "light": "Main Light",
+      "modes": [
+        {"name": "Turbo", "output_lm": 1000, "runtime_h": 1.33, "distance_m": 144, "intensity_cd": 5175}
+      ]
+    }
+  ],
+  "price": "<string or null>"
 }
+
+Battery type must be the cell format string (e.g. "14500", "21700", "18650", "AA", "AAA", "built-in").
+Set removable=false only for built-in batteries. Set included=true only if the battery ships in the box.
+If the same LED name appears in multiple CCT variants, list it once in leds with all CCT hints combined. Use the shared LED name in pairings.
+Tags must be lowercase hyphenated slugs. Only include tags that are explicitly supported by the product.
+Common tags: usb-charging, magnetic-tail, clip, side-switch, tail-switch, rear-switch, aux-light, dual-switch, lockout-mode, strobe, waterproof.
+Battery indicator tags: always emit "battery-indicator" if any indicator is present, plus a subtype tag when clearly stated — "battery-indicator-led" (colour-coded LED), "battery-indicator-voltage" (numeric voltage display), "battery-indicator-percentage" (percentage display), "battery-indicator-blink" (blink pattern).
+compatible_accessories: list accessories mentioned as compatible (e.g. extension tubes, diffusers). Empty array if none.
+mode_data: extract ALL light sources and ALL modes from the PDF spec table (ANSI/NEMA FL1 chart). Use null for missing values. Empty array if no mode data available. Do NOT use the UI diagram image for quantitative values — it shows button sequences only.
 
 Return only the JSON object. No markdown fences, no explanation."""
 
@@ -114,14 +135,28 @@ class SpecExtractor:
         """
         markdown = raw_page.markdown or ""
         variant_context = _build_variant_context(raw_page.raw_variant_data, scraper_hints)
-        user_content = f"Extract specs from this flashlight page:\n\n{markdown}"
+        text_content = f"Extract specs from this flashlight page:\n\n{markdown}"
         if variant_context:
-            user_content += f"\n\n{variant_context}"
+            text_content += f"\n\n{variant_context}"
+        if raw_page.manual_pdf_text:
+            truncated = raw_page.manual_pdf_text[:4000]
+            text_content += f"\n\n## Product Manual (PDF)\n{truncated}"
+
+        user_content: list | str = text_content
+        if raw_page.manual_ui_diagram_url:
+            user_content = [
+                {"type": "text", "text": text_content},
+                {
+                    "type": "image",
+                    "source": {"type": "url", "url": raw_page.manual_ui_diagram_url},
+                },
+                {"type": "text", "text": "The image above shows button operation sequences only. Do NOT use it for output_lm, runtime_h, distance_m, or intensity_cd — use the PDF spec table for all quantitative mode data."},
+            ]
 
         try:
             message = self._client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=2048,
+                model="claude-haiku-4-5-20251001",
+                max_tokens=4096,
                 system=_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_content}],
             )
@@ -141,17 +176,28 @@ class SpecExtractor:
                 detail=raw_json[:200],
             )
 
-        # Ensure source_url falls back to the page URL if LLM left it null
-        if not graph.get("source_url"):
-            graph["source_url"] = raw_page.url
+        # Always use the actual crawled URL — LLM guesses are unreliable
+        graph["source_url"] = raw_page.url
+
+        # Set hosted PDF URL (overrides anything the LLM may have guessed)
+        graph["manual_pdf_url"] = raw_page.manual_pdf_url
+
+        # Ensure new array fields always exist
+        graph.setdefault("batteries", [])
+        graph.setdefault("tags", [])
+        graph.setdefault("compatible_accessories", [])
+        graph.setdefault("mode_data", [])
+
+        # Set UI diagram URL from crawler (authoritative)
+        graph["ui_diagram_url"] = raw_page.manual_ui_diagram_url
 
         score, tier = _confidence(graph)
 
         return ExtractedProduct(
             id=0,
             raw_page_id=raw_page.id,
-            brand=graph.get("brand", "").strip().lower(),
-            model=graph.get("product_name", "").strip(),
+            brand=(graph.get("brand") or "").strip().lower(),
+            model=(graph.get("product_name") or "").strip(),
             configuration_graph=graph,
             confidence_score=score,
             confidence_tier=tier,

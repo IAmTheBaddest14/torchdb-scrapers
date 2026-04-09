@@ -42,6 +42,9 @@ class StagingRepository:
         image_urls: list[str],
         raw_variant_data: dict | None,
         scraper_version: str,
+        manual_pdf_url: str | None = None,
+        manual_pdf_text: str | None = None,
+        manual_ui_diagram_url: str | None = None,
     ) -> RawPage:
         row = (
             self._table("raw_pages")
@@ -52,11 +55,34 @@ class StagingRepository:
                 "image_urls": image_urls,
                 "raw_variant_data": raw_variant_data,
                 "scraper_version": scraper_version,
+                "manual_pdf_url": manual_pdf_url,
+                "manual_pdf_text": manual_pdf_text,
+                "manual_ui_diagram_url": manual_ui_diagram_url,
             })
             .execute()
             .data[0]
         )
         return RawPage(**row)
+
+    def upload_pdf(self, brand: str, url_slug: str, pdf_bytes: bytes) -> str:
+        """Upload a PDF to Supabase Storage and return its public URL."""
+        path = f"{brand}/{url_slug}-manual.pdf"
+        self._db.storage.from_("manuals").upload(
+            path=path,
+            file=pdf_bytes,
+            file_options={"content-type": "application/pdf", "upsert": "true"},
+        )
+        return self._db.storage.from_("manuals").get_public_url(path)
+
+    def upload_ui_diagram(self, brand: str, url_slug: str, png_bytes: bytes) -> str:
+        """Upload a UI diagram PNG to Supabase Storage and return its public URL."""
+        path = f"{brand}/{url_slug}-ui.png"
+        self._db.storage.from_("manuals").upload(
+            path=path,
+            file=png_bytes,
+            file_options={"content-type": "image/png", "upsert": "true"},
+        )
+        return self._db.storage.from_("manuals").get_public_url(path)
 
     def get_latest_crawl_run(self, brand: str) -> CrawlRun | None:
         rows = (

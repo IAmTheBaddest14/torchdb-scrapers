@@ -19,6 +19,9 @@ class RawPage(BaseModel):
     markdown: str | None
     image_urls: list[str]
     raw_variant_data: dict[str, Any] | None
+    manual_pdf_url: str | None = None
+    manual_pdf_text: str | None = None
+    manual_ui_diagram_url: str | None = None
     crawled_at: datetime
     scraper_version: str
 

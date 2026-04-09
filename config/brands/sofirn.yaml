@@ -16,7 +16,6 @@ exclude_patterns:
   - "(?i)holster"
   - "(?i)lanyard"
   - "(?i)diffuser"
-  - "(?i)clip"
 
 scraper_hints:
   led_option_names:
@@ -28,3 +27,8 @@ scraper_hints:
     - "CCT"
     - "Color Temperature"
     - "Tint"
+
+ui_diagram:
+  keywords:
+    - "General Operation"
+    - "Operation Guide"

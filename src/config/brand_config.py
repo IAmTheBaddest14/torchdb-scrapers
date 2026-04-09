@@ -19,6 +19,7 @@ class BrandConfig(BaseModel):
     collection_paths: list[str]
     exclude_patterns: list[str]
     scraper_hints: dict[str, Any] = {}
+    ui_diagram: dict[str, Any] = {}
 
     @field_validator("platform")
     @classmethod
