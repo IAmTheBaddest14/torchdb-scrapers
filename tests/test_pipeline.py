@@ -282,3 +282,55 @@ async def test_dry_run_makes_no_writes():
     repo.complete_crawl_run.assert_not_called()
     repo.save_extracted_product.assert_not_called()
     engine.promote.assert_not_called()
+
+
+# --- Behavior 6: urls=None triggers discover_urls before crawl ---
+
+@pytest.mark.asyncio
+async def test_pipeline_calls_discover_urls_when_no_urls_provided():
+    from src.pipeline import ScraperPipeline
+    from unittest.mock import AsyncMock
+
+    discovered = ["https://sofirnlight.com/products/sc33", "https://sofirnlight.com/products/sp36"]
+    crawler = fake_page_crawler(pages=[make_raw_page(id=1), make_raw_page(id=2)])
+    crawler.discover_urls = AsyncMock(return_value=discovered)
+
+    extractor = fake_spec_extractor()
+    repo = fake_repo(raw_pages=[make_raw_page(id=1), make_raw_page(id=2)])
+    engine = fake_promotion_engine()
+
+    pipeline = ScraperPipeline(
+        page_crawler=crawler,
+        spec_extractor=extractor,
+        promotion_engine=engine,
+        repo=repo,
+    )
+
+    await pipeline.run(phase="crawl", urls=None)
+
+    crawler.discover_urls.assert_called_once()
+    assert crawler.crawl_product.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_pipeline_skips_discover_urls_when_urls_provided():
+    from src.pipeline import ScraperPipeline
+    from unittest.mock import AsyncMock
+
+    crawler = fake_page_crawler()
+    crawler.discover_urls = AsyncMock(return_value=["https://sofirnlight.com/products/sc33"])
+
+    extractor = fake_spec_extractor()
+    repo = fake_repo()
+    engine = fake_promotion_engine()
+
+    pipeline = ScraperPipeline(
+        page_crawler=crawler,
+        spec_extractor=extractor,
+        promotion_engine=engine,
+        repo=repo,
+    )
+
+    await pipeline.run(phase="crawl", urls=URLS)
+
+    crawler.discover_urls.assert_not_called()

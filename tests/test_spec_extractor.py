@@ -314,7 +314,6 @@ def test_extract_with_ui_diagram_url_sends_text_only():
         raw_variant_data=None,
         crawled_at=datetime.now(timezone.utc),
         scraper_version="test",
-        manual_ui_diagram_url="https://example.com/ui.png",
     )
     client = fake_anthropic_client(SC33_GRAPH)
     extractor = SpecExtractor(client)

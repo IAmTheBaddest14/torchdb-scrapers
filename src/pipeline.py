@@ -50,10 +50,12 @@ class ScraperPipeline:
         result = PipelineResult()
 
         if phase in ("crawl", "both"):
+            if not urls:
+                urls = await self._crawler.discover_urls()
             crawl_run = self._repo.create_crawl_run(
                 brand=brand, scraper_version=self._version
             )
-            pages = await self._run_crawl(crawl_run.id, urls or [], dry_run)
+            pages = await self._run_crawl(crawl_run.id, urls, dry_run)
             result.pages_crawled = len(pages)
             if not dry_run:
                 self._repo.complete_crawl_run(crawl_run.id, len(pages))

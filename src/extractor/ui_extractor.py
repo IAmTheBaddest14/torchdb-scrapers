@@ -73,8 +73,9 @@ def _default_tags_for_known_framework(slug: str) -> dict[str, Any]:
 
 
 class UIExtractor:
-    def __init__(self, llm_client):
+    def __init__(self, llm_client, pdf_diagram_extractor=None):
         self._client = llm_client
+        self._pdf_diagram_extractor = pdf_diagram_extractor
 
     def extract(self, raw_page: RawPage) -> list[dict[str, Any]]:
         """Extract UI instances from a raw page.
@@ -100,9 +101,16 @@ class UIExtractor:
 
         # Path 3: vision scan of images
         if not image_urls:
+            if self._pdf_diagram_extractor and raw_page.manual_pdf_url:
+                return self._pdf_diagram_extractor.extract(raw_page.manual_pdf_url, raw_page.url)
             return []
 
-        return self._extract_from_images(image_urls, raw_page)
+        instances = self._extract_from_images(image_urls, raw_page)
+
+        if self._pdf_diagram_extractor and raw_page.manual_pdf_url:
+            instances.extend(self._pdf_diagram_extractor.extract(raw_page.manual_pdf_url, raw_page.url))
+
+        return instances
 
     def _extract_from_images(self, image_urls: list[str], raw_page: RawPage) -> list[dict[str, Any]]:
         """Send each image to Claude vision, collect UI diagrams found."""

@@ -12,14 +12,21 @@ from src.staging.models import RawPage
 KNOWN_FRAMEWORKS = ["anduril_2", "narsilm", "zebralight"]
 
 
-def make_raw_page(markdown: str = "", image_urls: list[str] = None, raw_variant_data: dict = None) -> RawPage:
+def make_raw_page(
+    markdown: str = "",
+    image_urls: list[str] = None,
+    raw_variant_data: dict = None,
+    manual_pdf_url: str = None,
+    url: str = "https://sofirnlight.com/products/test",
+) -> RawPage:
     return RawPage(
         id=1,
         crawl_run_id=1,
-        url="https://sofirnlight.com/products/test",
+        url=url,
         markdown=markdown,
         image_urls=image_urls or [],
         raw_variant_data=raw_variant_data,
+        manual_pdf_url=manual_pdf_url,
         crawled_at=datetime.now(timezone.utc),
         scraper_version="test",
     )
@@ -203,3 +210,38 @@ def test_extract_skips_non_ui_images():
     assert result[0]["diagrams"][0]["label"] == "Mode Chart"
     # All 3 images were checked
     assert client.complete.call_count == 3
+
+
+# --- Behavior 6: PDF path — UIExtractor delegates to pdf_diagram_extractor when manual_pdf_url is set ---
+
+def test_extract_delegates_to_pdf_diagram_extractor_when_manual_pdf_url_set():
+    from src.extractor.ui_extractor import UIExtractor
+
+    raw_page = make_raw_page(
+        markdown="",
+        image_urls=[],
+        manual_pdf_url="https://storage.example.com/manuals/sc33.pdf",
+        url="https://sofirnlight.com/products/sc33",
+    )
+
+    pdf_instance = {
+        "framework": "proprietary",
+        "framework_source": "pdf",
+        "switchable": False,
+        "diagrams": [{"label": "Operation", "diagram_url": "https://storage.example.com/ui/sc33.png", "completeness": 1.0}],
+        "tags": {},
+        "needs_review": False,
+        "variant_hint": None,
+    }
+    pdf_extractor = MagicMock()
+    pdf_extractor.extract.return_value = [pdf_instance]
+
+    client = MagicMock()
+    extractor = UIExtractor(client, pdf_diagram_extractor=pdf_extractor)
+
+    result = extractor.extract(raw_page)
+
+    assert len(result) == 1
+    assert result[0]["diagrams"][0]["diagram_url"] == "https://storage.example.com/ui/sc33.png"
+    pdf_extractor.extract.assert_called_once()
+    client.complete.assert_not_called()

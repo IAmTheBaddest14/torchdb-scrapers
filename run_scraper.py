@@ -25,7 +25,8 @@ def build_pipeline(
     from src.config.brand_config import BrandConfig
     from src.crawler.page_crawler import PageCrawler
     from src.extractor.spec_extractor import SpecExtractor
-    from src.extractor.configuration_graph_builder import ConfigurationGraphBuilder
+    from src.extractor.ui_extractor import UIExtractor
+    from src.extractor.pdf_diagram_extractor import PDFDiagramExtractor
     from src.llm.client import make_spec_client, make_vision_client
     from src.promotion.promotion_engine import PromotionEngine
     from src.staging.repository import StagingRepository
@@ -53,8 +54,17 @@ def build_pipeline(
         ollama_api_key=ollama_api_key,
     )
 
-    page_crawler = PageCrawler(config, vision_client=vision_client)
+    pdf_diagram_extractor = PDFDiagramExtractor(
+        vision_client=vision_client,
+        image_uploader=lambda slug, png_bytes: repo.upload_ui_diagram(config.brand, slug, png_bytes),
+        brand=config.brand,
+        ui_keywords=config.ui_diagram.get("keywords") or None,
+        page_index_hint=config.ui_diagram.get("page_index_hint"),
+    )
+
+    page_crawler = PageCrawler(config)
     spec_extractor = SpecExtractor(spec_client)
+    ui_extractor = UIExtractor(vision_client, pdf_diagram_extractor=pdf_diagram_extractor)
     promotion_engine = PromotionEngine(
         torchdb_client=None,  # stub until TorchDB schema (#5) is implemented
         repo=repo,

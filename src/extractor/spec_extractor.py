@@ -231,9 +231,6 @@ class SpecExtractor:
         graph.setdefault("compatible_accessories", [])
         graph.setdefault("mode_data", [])
 
-        # Set UI diagram URL from crawler (authoritative)
-        graph["ui_diagram_url"] = raw_page.manual_ui_diagram_url
-
         score, tier = _confidence(graph)
 
         return ExtractedProduct(
