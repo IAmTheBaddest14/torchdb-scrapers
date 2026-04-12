@@ -4,6 +4,21 @@ import json
 from typing import Any
 
 
+def parse_product_urls(html: str, base_url: str) -> list[str]:
+    """Extract unique absolute product URLs from a collection page.
+
+    Finds all href="/products/..." links and returns them as absolute URLs.
+    Deduplicates preserving first-seen order.
+    """
+    base = base_url.rstrip("/")
+    paths = re.findall(r'href=["\'](/products/[^"\'?#]+)["\']', html)
+    seen: dict[str, None] = {}
+    for path in paths:
+        url = base + path
+        seen[url] = None
+    return list(seen)
+
+
 def parse_variant_options(html: str) -> list[dict[str, Any]]:
     """Extract the options array from embedded product JSON in page HTML.
 

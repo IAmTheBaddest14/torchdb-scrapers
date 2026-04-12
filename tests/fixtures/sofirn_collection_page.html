@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head><title>Sofirn Flashlights</title></head>
+<body>
+  <div class="collection-grid">
+    <div class="product-card">
+      <a href="/products/sc33-edc-flashlight" class="product-card__title">SC33</a>
+      <img src="https://cdn.example.com/sc33.jpg" />
+    </div>
+    <div class="product-card">
+      <a href="/products/sp36-pro-flashlight" class="product-card__title">SP36 Pro</a>
+      <img src="https://cdn.example.com/sp36.jpg" />
+    </div>
+    <div class="product-card">
+      <a href="/products/sc21-pro-mini-flashlight" class="product-card__title">SC21 Pro</a>
+    </div>
+    <!-- Battery accessory — should be filtered -->
+    <div class="product-card">
+      <a href="/products/21700-battery-pack" class="product-card__title">21700 Battery</a>
+    </div>
+    <!-- Duplicate link — should be deduplicated -->
+    <a href="/products/sc33-edc-flashlight">View SC33</a>
+    <!-- External link — should be ignored -->
+    <a href="https://amazon.com/products/sc33">Buy on Amazon</a>
+    <!-- Non-product internal link — should be ignored -->
+    <a href="/collections/headlamps">Headlamps</a>
+  </div>
+</body>
+</html>
