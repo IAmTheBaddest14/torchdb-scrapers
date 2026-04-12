@@ -13,13 +13,20 @@ from supabase import create_client
 load_dotenv()
 
 
-def build_pipeline(brand: str, dry_run: bool, promote: bool):
-    from anthropic import Anthropic
+def build_pipeline(
+    brand: str,
+    dry_run: bool,
+    promote: bool,
+    llm_backend: str = "anthropic",
+    ollama_model: str = "qwen3.5:4b",
+    ollama_base_url: str = "http://localhost:11434/v1",
+    ollama_api_key: str = "ollama",
+):
     from src.config.brand_config import BrandConfig
     from src.crawler.page_crawler import PageCrawler
     from src.extractor.spec_extractor import SpecExtractor
-    from src.extractor.ui_extractor import UIExtractor
     from src.extractor.configuration_graph_builder import ConfigurationGraphBuilder
+    from src.llm.client import make_spec_client, make_vision_client
     from src.promotion.promotion_engine import PromotionEngine
     from src.staging.repository import StagingRepository
     from src.pipeline import ScraperPipeline
@@ -27,10 +34,27 @@ def build_pipeline(brand: str, dry_run: bool, promote: bool):
     config = BrandConfig.load(brand)
     supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_ROLE_KEY"])
     repo = StagingRepository(supabase)
-    anthropic = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
-    page_crawler = PageCrawler(config)
-    spec_extractor = SpecExtractor(anthropic)
+    anthropic_client = None
+    if llm_backend == "anthropic":
+        from anthropic import Anthropic
+        anthropic_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+    spec_client = make_spec_client(
+        llm_backend, anthropic_client,
+        ollama_model=ollama_model,
+        ollama_base_url=ollama_base_url,
+        ollama_api_key=ollama_api_key,
+    )
+    vision_client = make_vision_client(
+        llm_backend, anthropic_client,
+        ollama_model=ollama_model,
+        ollama_base_url=ollama_base_url,
+        ollama_api_key=ollama_api_key,
+    )
+
+    page_crawler = PageCrawler(config, vision_client=vision_client)
+    spec_extractor = SpecExtractor(spec_client)
     promotion_engine = PromotionEngine(
         torchdb_client=None,  # stub until TorchDB schema (#5) is implemented
         repo=repo,
@@ -53,10 +77,27 @@ async def main():
     parser.add_argument("--urls", help="Comma-separated product URLs (crawl phase only)")
     parser.add_argument("--promote", action="store_true", help="Run PromotionEngine after extraction")
     parser.add_argument("--dry-run", action="store_true", help="No writes to Supabase or TorchDB")
+    parser.add_argument(
+        "--llm-backend",
+        choices=["anthropic", "ollama"],
+        default="anthropic",
+        help="LLM backend for extraction (default: anthropic)",
+    )
+    parser.add_argument("--ollama-model", default=os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), help="Ollama model tag")
+    parser.add_argument("--ollama-url", default=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"), help="Ollama base URL")
+    parser.add_argument("--ollama-key", default=os.getenv("OLLAMA_API_KEY", "ollama"), help="Ollama API key")
     args = parser.parse_args()
 
     urls = [u.strip() for u in args.urls.split(",")] if args.urls else None
-    pipeline = build_pipeline(args.brand, dry_run=args.dry_run, promote=args.promote)
+    pipeline = build_pipeline(
+        args.brand,
+        dry_run=args.dry_run,
+        promote=args.promote,
+        llm_backend=args.llm_backend,
+        ollama_model=args.ollama_model,
+        ollama_base_url=args.ollama_url,
+        ollama_api_key=args.ollama_key,
+    )
 
     result = await pipeline.run(
         phase=args.phase,

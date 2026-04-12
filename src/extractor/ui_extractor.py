@@ -73,8 +73,8 @@ def _default_tags_for_known_framework(slug: str) -> dict[str, Any]:
 
 
 class UIExtractor:
-    def __init__(self, anthropic_client):
-        self._client = anthropic_client
+    def __init__(self, llm_client):
+        self._client = llm_client
 
     def extract(self, raw_page: RawPage) -> list[dict[str, Any]]:
         """Extract UI instances from a raw page.
@@ -146,9 +146,7 @@ class UIExtractor:
         return instances
 
     def _call_vision(self, image_url: str) -> dict[str, Any]:
-        message = self._client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=2048,
+        raw = self._client.complete(
             system=_VISION_SYSTEM_PROMPT,
             messages=[{
                 "role": "user",
@@ -157,8 +155,8 @@ class UIExtractor:
                     {"type": "text", "text": "Analyze this image."},
                 ],
             }],
+            max_tokens=2048,
         )
-        raw = message.content[0].text.strip()
         return json.loads(raw)
 
     def _known_framework_instance(self, slug: str, variant_hint: str | None) -> dict[str, Any]:

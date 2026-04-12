@@ -29,15 +29,9 @@ def make_raw_page(markdown: str, url: str = "https://sofirnlight.com/products/sc
 
 
 def fake_anthropic_client(response_graph: dict):
-    """Return a minimal fake Anthropic client that yields a canned ConfigurationGraph JSON."""
-    content_block = MagicMock()
-    content_block.text = json.dumps(response_graph)
-
-    message = MagicMock()
-    message.content = [content_block]
-
+    """Return a minimal fake LLM client that yields a canned ConfigurationGraph JSON."""
     client = MagicMock()
-    client.messages.create.return_value = message
+    client.complete.return_value = json.dumps(response_graph)
     return client
 
 
@@ -156,12 +150,8 @@ def test_markdown_fenced_json_is_parsed_correctly():
     from src.extractor.spec_extractor import SpecExtractor
 
     fenced = f"```json\n{json.dumps(SC33_GRAPH)}\n```"
-    content_block = MagicMock()
-    content_block.text = fenced
-    message = MagicMock()
-    message.content = [content_block]
     client = MagicMock()
-    client.messages.create.return_value = message
+    client.complete.return_value = fenced
 
     extractor = SpecExtractor(client)
     result = extractor.extract(make_raw_page("Some markdown."))
@@ -176,12 +166,8 @@ def test_unparseable_response_raises_extraction_error():
     from src.extractor.spec_extractor import SpecExtractor, ExtractionError
 
     garbage = "Sorry, I cannot extract specs from this page. The content is unclear."
-    content_block = MagicMock()
-    content_block.text = garbage
-    message = MagicMock()
-    message.content = [content_block]
     client = MagicMock()
-    client.messages.create.return_value = message
+    client.complete.return_value = garbage
 
     extractor = SpecExtractor(client)
 
@@ -199,7 +185,7 @@ def test_api_error_raises_extraction_error():
     from src.extractor.spec_extractor import SpecExtractor, ExtractionError
 
     client = MagicMock()
-    client.messages.create.side_effect = Exception("Rate limit exceeded. Retry after 60s.")
+    client.complete.side_effect = Exception("Rate limit exceeded. Retry after 60s.")
 
     extractor = SpecExtractor(client)
 
@@ -229,9 +215,10 @@ SCRAPER_HINTS = {
 
 def capture_llm_message(client) -> str:
     """Return the user message string that was sent to the fake LLM."""
-    call_args = client.messages.create.call_args
-    messages = call_args.kwargs.get("messages") or call_args.args[2] if call_args.args else []
-    return messages[0]["content"] if messages else ""
+    call_args = client.complete.call_args
+    messages = call_args.kwargs.get("messages") or []
+    content = messages[0]["content"] if messages else ""
+    return content if isinstance(content, str) else ""
 
 
 # --- Behavior 9: Brand is lowercased on ExtractedProduct regardless of LLM casing ---
@@ -262,13 +249,6 @@ SCRAPER_HINTS = {
     "cct_option_names": ["CCT", "Color Temperature", "Tint"],
     "led_option_names": ["LED", "Emitter"],
 }
-
-
-def capture_llm_message(client) -> str:
-    """Return the user message string that was sent to the fake LLM."""
-    call_args = client.messages.create.call_args
-    messages = call_args.kwargs.get("messages") or []
-    return messages[0]["content"] if messages else ""
 
 
 # --- Behavior 10: Variant option names and values appear in the LLM user message ---
@@ -317,3 +297,31 @@ def test_scraper_hints_included_in_llm_message():
     msg = capture_llm_message(client)
     assert "Color Temperature" in msg
     assert "Emitter" in msg
+
+
+# --- Behavior 13: Spec pass is always text-only, even when UI diagram URL is present ---
+
+def test_extract_with_ui_diagram_url_sends_text_only():
+    from src.extractor.spec_extractor import SpecExtractor
+    from src.staging.models import RawPage
+
+    raw_page = RawPage(
+        id=1,
+        crawl_run_id=1,
+        url="https://sofirnlight.com/products/st10",
+        markdown="Some markdown.",
+        image_urls=[],
+        raw_variant_data=None,
+        crawled_at=datetime.now(timezone.utc),
+        scraper_version="test",
+        manual_ui_diagram_url="https://example.com/ui.png",
+    )
+    client = fake_anthropic_client(SC33_GRAPH)
+    extractor = SpecExtractor(client)
+
+    extractor.extract(raw_page)
+
+    call_args = client.complete.call_args
+    messages = call_args.kwargs.get("messages") or []
+    content = messages[0]["content"]
+    assert isinstance(content, str), "Spec pass must send text-only — image should not be included"

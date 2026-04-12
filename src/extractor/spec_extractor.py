@@ -4,7 +4,61 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
+from pydantic import BaseModel
+
 from src.staging.models import ExtractedProduct, RawPage
+
+
+# --- Pydantic schema for structured output (used by Ollama grammar-constrained decoding) ---
+
+class _LED(BaseModel):
+    name: str
+    cct_hints: list[str] = []
+
+class _Driver(BaseModel):
+    name: str
+
+class _Pairing(BaseModel):
+    led: str
+    driver: str
+
+class _Specs(BaseModel):
+    length_mm: float | None = None
+    weight_g: float | None = None
+    material: str | None = None
+    max_lumens: float | None = None
+
+class _Battery(BaseModel):
+    type: str
+    capacity_mah: float | None = None
+    included: bool = False
+    removable: bool = True
+
+class _Mode(BaseModel):
+    name: str
+    output_lm: float | None = None
+    runtime_h: float | None = None
+    distance_m: float | None = None
+    intensity_cd: float | None = None
+
+class _LightModes(BaseModel):
+    light: str
+    modes: list[_Mode] = []
+
+class FlashlightExtraction(BaseModel):
+    product_name: str = ""
+    brand: str = ""
+    leds: list[_LED] = []
+    drivers: list[_Driver] = []
+    pairings: list[_Pairing] = []
+    specs: _Specs = _Specs()
+    batteries: list[_Battery] = []
+    tags: list[str] = []
+    compatible_accessories: list[str] = []
+    mode_data: list[_LightModes] = []
+    price: str | None = None
+
+FLASHLIGHT_JSON_SCHEMA = FlashlightExtraction.model_json_schema()
 
 
 class ExtractionError(Exception):
@@ -124,8 +178,8 @@ def _confidence(graph: dict[str, Any]) -> tuple[float, str]:
 
 
 class SpecExtractor:
-    def __init__(self, anthropic_client, prompt_version: str = PROMPT_VERSION):
-        self._client = anthropic_client
+    def __init__(self, llm_client, prompt_version: str = PROMPT_VERSION):
+        self._client = llm_client
         self._prompt_version = prompt_version
 
     def extract(self, raw_page: RawPage, scraper_hints: dict | None = None) -> ExtractedProduct:
@@ -142,28 +196,17 @@ class SpecExtractor:
             truncated = raw_page.manual_pdf_text[:4000]
             text_content += f"\n\n## Product Manual (PDF)\n{truncated}"
 
-        user_content: list | str = text_content
-        if raw_page.manual_ui_diagram_url:
-            user_content = [
-                {"type": "text", "text": text_content},
-                {
-                    "type": "image",
-                    "source": {"type": "url", "url": raw_page.manual_ui_diagram_url},
-                },
-                {"type": "text", "text": "The image above shows button operation sequences only. Do NOT use it for output_lm, runtime_h, distance_m, or intensity_cd — use the PDF spec table for all quantitative mode data."},
-            ]
+        user_content = text_content
 
         try:
-            message = self._client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=4096,
+            raw_json = self._client.complete(
                 system=_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_content}],
+                max_tokens=4096,
+                response_schema=FLASHLIGHT_JSON_SCHEMA,
             )
         except Exception as e:
             raise ExtractionError(reason="api_error", detail=str(e))
-
-        raw_json = message.content[0].text.strip()
         # Strip markdown code fences if Claude wrapped the response
         raw_json = re.sub(r"^```(?:json)?\s*", "", raw_json)
         raw_json = re.sub(r"\s*```$", "", raw_json).strip()

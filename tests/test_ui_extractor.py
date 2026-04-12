@@ -26,21 +26,17 @@ def make_raw_page(markdown: str = "", image_urls: list[str] = None, raw_variant_
 
 
 def fake_vision_client(*responses: dict):
-    """Return a fake Anthropic client whose vision calls return canned JSON responses in order."""
+    """Return a fake LLM client whose vision calls return canned JSON responses in order."""
     call_count = 0
 
-    def create(**kwargs):
+    def complete(**kwargs):
         nonlocal call_count
         resp = responses[min(call_count, len(responses) - 1)]
         call_count += 1
-        content_block = MagicMock()
-        content_block.text = json.dumps(resp)
-        message = MagicMock()
-        message.content = [content_block]
-        return message
+        return json.dumps(resp)
 
     client = MagicMock()
-    client.messages.create.side_effect = create
+    client.complete.side_effect = complete
     return client
 
 
@@ -59,7 +55,7 @@ def test_extract_returns_empty_list_when_no_ui_content():
     result = extractor.extract(raw_page)
 
     assert result == []
-    client.messages.create.assert_not_called()
+    client.complete.assert_not_called()
 
 
 # --- Behavior 2: Detects known framework by name in markdown — no vision call ---
@@ -83,7 +79,7 @@ def test_extract_detects_known_framework_from_text():
     assert result[0]["tags"]["programmable"] is True
     assert result[0]["tags"]["complexity"] == "Complex"
     # Should NOT have made any vision calls
-    client.messages.create.assert_not_called()
+    client.complete.assert_not_called()
 
 
 # --- Behavior 3: Returns multiple UIInstances when images map to different UI variants ---
@@ -206,4 +202,4 @@ def test_extract_skips_non_ui_images():
     assert len(result) == 1
     assert result[0]["diagrams"][0]["label"] == "Mode Chart"
     # All 3 images were checked
-    assert client.messages.create.call_count == 3
+    assert client.complete.call_count == 3
