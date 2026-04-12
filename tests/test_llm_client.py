@@ -20,6 +20,23 @@ def test_text_block_passes_through():
     assert result == [{"role": "user", "content": [{"type": "text", "text": "Describe this."}]}]
 
 
+def test_anthropic_base64_image_block_converts_to_data_uri():
+    """base64 image sources (used for PDF thumbnails) must become data URIs for Ollama."""
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "abc123"}},
+        ],
+    }]
+    result = _convert_messages(messages)
+    assert result == [{
+        "role": "user",
+        "content": [
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc123"}},
+        ],
+    }]
+
+
 def test_anthropic_image_block_converts_to_openai_format():
     messages = [{
         "role": "user",

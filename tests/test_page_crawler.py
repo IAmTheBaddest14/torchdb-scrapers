@@ -84,7 +84,76 @@ def test_exclude_patterns_filter_product_urls():
     assert "https://sofirnlight.com/products/replacement-lens" not in result
 
 
-# --- Behavior 5: Integration — crawl real URL and save raw_page to Supabase ---
+# --- Behavior 5: Multilang boundary detection ---
+
+def _make_mock_page(blocks):
+    """Return a mock fitz.Page whose get_text('blocks') yields the given blocks.
+
+    Each block is (x0, y0, x1, y1, text).  Block number and type are appended
+    to match the real PyMuPDF tuple format.
+    """
+    from unittest.mock import MagicMock
+    page = MagicMock()
+    page.get_text.return_value = [
+        (x0, y0, x1, y1, text, 0, 0) for x0, y0, x1, y1, text in blocks
+    ]
+    return page
+
+
+def test_multilang_boundary_finds_standalone_language_header():
+    """Detects the first non-English section header and returns its y-coordinate."""
+    from src.crawler.page_crawler import PageCrawler
+    page = _make_mock_page([
+        (100, 50,  400, 60,  "General Operation\n"),
+        (1418, 370, 1468, 382, "(DE)Deutsch\n"),        # standalone — 12 chars
+        (1418, 715, 1468, 727, "(FR)Français\n"),       # later — should not be min
+    ])
+    assert PageCrawler._find_multilang_boundary_y(page) == 370
+
+
+def test_multilang_boundary_skips_toc_entries():
+    """TOC lines (long strings with fill characters) must not trigger the boundary."""
+    from src.crawler.page_crawler import PageCrawler
+    long_toc = "(DE)Deutsch " + "·" * 65   # well over 60 chars
+    page = _make_mock_page([
+        (1416, 85, 1591, 95, long_toc),
+    ])
+    assert PageCrawler._find_multilang_boundary_y(page) is None
+
+
+def test_multilang_boundary_returns_none_when_absent():
+    """Pages with no language markers return None — no crop capping applied."""
+    from src.crawler.page_crawler import PageCrawler
+    page = _make_mock_page([
+        (100, 50,  400, 60,  "General Operation\n"),
+        (100, 200, 400, 210, "Button functions\n"),
+    ])
+    assert PageCrawler._find_multilang_boundary_y(page) is None
+
+
+# --- Behavior 6: Content-column x-boundary detection ---
+
+def test_content_column_x_finds_contents_block():
+    """Returns the x0 of the CONTENTS heading so the right column is excluded."""
+    from src.crawler.page_crawler import PageCrawler
+    page = _make_mock_page([
+        (820,  25, 869,  50, "Figure 3\n"),
+        (1415, 25, 1483, 42, "CONTENTS\n"),
+    ])
+    assert PageCrawler._find_content_column_x(page) == 1415
+
+
+def test_content_column_x_returns_none_when_absent():
+    """Single-column pages (e.g. portrait multi-page manuals) return None — full width used."""
+    from src.crawler.page_crawler import PageCrawler
+    page = _make_mock_page([
+        (100, 25, 400, 50, "General Operation\n"),
+        (100, 80, 400, 90, "Press button to turn on.\n"),
+    ])
+    assert PageCrawler._find_content_column_x(page) is None
+
+
+# --- Behavior 7: Integration — crawl real URL and save raw_page to Supabase ---
 
 @pytest.mark.integration
 @pytest.mark.asyncio
