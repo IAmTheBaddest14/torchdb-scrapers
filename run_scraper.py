@@ -83,8 +83,10 @@ def build_pipeline(
 async def main():
     parser = argparse.ArgumentParser(description="TorchDB scraper pipeline")
     parser.add_argument("--brand", default="sofirn", help="Brand to scrape")
-    parser.add_argument("--phase", choices=["crawl", "extract", "both"], default="both")
+    parser.add_argument("--phase", choices=["discover", "crawl", "extract", "both"], default="both")
     parser.add_argument("--urls", help="Comma-separated product URLs (crawl phase only)")
+    parser.add_argument("--urls-file", help="Path to JSON or plain-text file of product URLs")
+    parser.add_argument("--interactive", action="store_true", help="Interactively select URLs before crawling")
     parser.add_argument("--promote", action="store_true", help="Run PromotionEngine after extraction")
     parser.add_argument("--dry-run", action="store_true", help="No writes to Supabase or TorchDB")
     parser.add_argument(
@@ -98,7 +100,35 @@ async def main():
     parser.add_argument("--ollama-key", default=os.getenv("OLLAMA_API_KEY", "ollama"), help="Ollama API key")
     args = parser.parse_args()
 
-    urls = [u.strip() for u in args.urls.split(",")] if args.urls else None
+    from src.cli.url_io import load_urls_from_file, save_discovered_urls, select_urls_interactively
+    from src.config.brand_config import BrandConfig
+    from src.crawler.page_crawler import PageCrawler
+
+    # --- Phase: discover — enumerate URLs and save to file, then exit ---
+    if args.phase == "discover":
+        config = BrandConfig.load(args.brand)
+        crawler = PageCrawler(config)
+        print(f"Discovering URLs for '{args.brand}'...")
+        discovered = await crawler.discover_urls()
+        path = save_discovered_urls(args.brand, discovered)
+        print(f"Found {len(discovered)} URLs → {path}")
+        if args.interactive:
+            discovered = select_urls_interactively(discovered)
+            print(f"Selected {len(discovered)} URLs.")
+        return
+
+    # --- Resolve URLs from --urls, --urls-file, or discovery ---
+    if args.urls:
+        urls = [u.strip() for u in args.urls.split(",")]
+    elif args.urls_file:
+        urls = load_urls_from_file(args.urls_file)
+        print(f"Loaded {len(urls)} URLs from {args.urls_file}")
+        if args.interactive:
+            urls = select_urls_interactively(urls)
+            print(f"Selected {len(urls)} URLs.")
+    else:
+        urls = None  # pipeline will call discover_urls() automatically
+
     pipeline = build_pipeline(
         args.brand,
         dry_run=args.dry_run,
